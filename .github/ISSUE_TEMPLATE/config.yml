@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and setup help
+    url: https://spinet.dev/#faq
+    about: Common questions about Spinet are answered on the website.
+  - name: Setting up a server
+    url: https://github.com/Kevcar98/Spinet-Server#readme
+    about: Step-by-step instructions and a video guide for running your own server.
+  - name: Writing an extension
+    url: https://github.com/Kevcar98/Spinet-Modular/blob/main/docs/WRITING-EXTENSIONS.md
+    about: How to build your own extension for Spinet.

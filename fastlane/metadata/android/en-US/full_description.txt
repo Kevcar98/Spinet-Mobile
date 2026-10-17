@@ -1,0 +1,28 @@
+Spinet is an Android music player built with Kotlin Multiplatform and Compose.
+It plays your own music from a folder on the phone, from a server you host, or
+from sources you add yourself, with real background playback and lock-screen
+controls. It comes with no sources of its own.
+
+Features:
+
+* Search across every enabled source, results merged.
+* Background playback (Media3/ExoPlayer) with lock-screen and notification
+  controls, and wake handling so audio keeps playing when the screen locks.
+* On-device music: point the app at a phone folder and play your files offline.
+* Your own servers: add several, in the order you want them used. Browse folders as playlists, upload from the phone,
+  save to the server, and delete, on a backend you host yourself.
+* Downloads with title, artist and cover art embedded, so tracks survive offline.
+* Plays the copy closest to you first: the phone, then your server, then online.
+* Duplicate-free library; playlists never hold the same song twice.
+* Playlists: create, import from CSV, toggle drag-to-reorder, and pick
+  alternate versions of a song (with preview before replacing).
+* Shuffle, repeat-all and repeat-one, with a currently-playing indicator and a
+  progress bar on every list.
+* Themes, including custom themes from hex colours.
+* Session resume: remembers your queue, track, position and shuffle/repeat state.
+
+Downloading copyrighted material may breach a provider's Terms of Service or your
+local law; you decide what you fetch and store, and you carry that responsibility.
+
+The companion self-hosted backend lives at:
+https://github.com/Kevcar98/Spinet-Server

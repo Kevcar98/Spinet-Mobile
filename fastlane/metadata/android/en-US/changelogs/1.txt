@@ -1,0 +1,2 @@
+First release: search, background playback, on-device + self-hosted library,
+downloads with embedded metadata, playlists, shuffle/repeat, themes, session resume.

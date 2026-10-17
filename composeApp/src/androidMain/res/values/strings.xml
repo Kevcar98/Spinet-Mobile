@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Spinet</string>
+
+    <string name="widget_now_playing_label">Spinet</string>
+    <string name="widget_now_playing_description">Cover art and playback controls for the current song.</string>
+</resources>
