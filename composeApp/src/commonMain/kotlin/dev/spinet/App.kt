@@ -690,7 +690,12 @@ fun App(
                             onClearSelection = viewModel::onClearSelection,
                             onSelectAll = viewModel::onSelectAll,
                             onAddSelectionToPlaylist = { addSelection = true },
-                            onRemove = null,
+                            onRemove = { viewModel.onRemoveFromMostPlayed(listOf(it)) },
+                            removeText = "Remove from Most Played",
+                            onRemoveSelection = { chosen ->
+                                viewModel.onRemoveFromMostPlayed(chosen)
+                                viewModel.onClearSelection()
+                            },
                             onDelete = null,
                             serverTargets = browsableSources,
                             onSaveTrackToDevice = { track -> viewModel.onDownloadClicked(track) },

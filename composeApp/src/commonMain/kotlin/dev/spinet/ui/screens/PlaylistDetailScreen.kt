@@ -69,6 +69,7 @@ fun PlaylistDetailScreen(
 
     onRemoveSelection: ((List<Track>) -> Unit)? = null,
     onRemove: ((Track) -> Unit)?,
+    removeText: String? = null,
     onDelete: (() -> Unit)?,
     onRename: ((String) -> Unit)? = null,
     onMove: ((fromIndex: Int, toIndex: Int) -> Unit)? = null,
@@ -409,6 +410,7 @@ fun PlaylistDetailScreen(
                     onRemoveFromPlaylist = if (isFavoritesList) null
                     else onRemove?.let { cb -> { cb(track) } },
                     removeIsUnlike = isFavoritesList,
+                    removeText = removeText,
 
                     leadingHandle = if (reorderable && reorderMode && sortMode == SortMode.CUSTOM) {
                         {
