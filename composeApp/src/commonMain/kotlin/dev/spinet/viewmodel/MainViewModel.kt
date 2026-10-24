@@ -1962,15 +1962,27 @@ class MainViewModel(
             versionOptions = emptyList(),
             versionLoading = true
         )
-        viewModelScope.launch {
-            val query = listOf(track.artist, track.title).filter { it.isNotBlank() }.joinToString(" ")
+        onSearchVersions(listOf(track.artist, track.title).filter { it.isNotBlank() }.joinToString(" "))
+    }
 
+    private var versionSearchJob: Job? = null
+
+    fun onSearchVersions(query: String) {
+        val track = _uiState.value.versionPickerFor ?: return
+        val wanted = query.trim()
+        if (wanted.isEmpty()) return
+        versionSearchJob?.cancel()
+        _uiState.value = _uiState.value.copy(versionOptions = emptyList(), versionLoading = true)
+        versionSearchJob = viewModelScope.launch {
             val results = try {
-                repository.search(query, musicOnly = false)
+                repository.search(wanted, musicOnly = false)
                     .filter { it.itemId != track.itemId }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 emptyList()
             }
+            if (_uiState.value.versionPickerFor?.id != track.id) return@launch
             _uiState.value = _uiState.value.copy(versionOptions = results, versionLoading = false)
         }
     }

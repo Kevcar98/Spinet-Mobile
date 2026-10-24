@@ -221,11 +221,11 @@ class NetworkRepository(
         }
     }
 
-    suspend fun search(query: String, musicOnly: Boolean = true): List<Track> {
+    suspend fun search(query: String, musicOnly: Boolean = true, extensionsOnly: Boolean = false): List<Track> {
         if (query.isBlank()) return emptyList()
         val serverFilter = if (musicOnly) "music_songs" else "videos"
 
-        val enabledSources = sourcesProvider()
+        val enabledSources = sourcesProvider().filter { !extensionsOnly || it.kind == SourceKind.EXTENSION }
         if (enabledSources.isEmpty()) {
             throw SearchUnavailableException(
                 "No sources enabled. Turn one on in Settings > Sources.",
