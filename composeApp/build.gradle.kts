@@ -71,7 +71,7 @@ kotlin {
     }
 }
 
-val appVersion = "0.0.2"
+val appVersion = "0.0.3"
 
 val appVersionCode = appVersion.split('.').map { it.toInt() }
     .let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }

@@ -2367,7 +2367,11 @@ class MainViewModel(
             }
         }
         val sourceIds = pluginManager.all().map { it.id }.toSet()
-        remote.sources.filterNot { it.builtIn || it.id in sourceIds }.forEach { s ->
+        val removedServers = removedServerUrls()
+        remote.sources.filterNot {
+            it.builtIn || it.id in sourceIds ||
+                (it.baseUrl.isNotBlank() && serverUrlKey(it.baseUrl) in removedServers)
+        }.forEach { s ->
             pluginManager.upsert(s.id, s.name, s.baseUrl)
         }
 
@@ -2716,6 +2720,7 @@ class MainViewModel(
         val label = name.trim().ifBlank { servers.firstOrNull { it.id == serverId }?.name ?: serverLabel(url) }
 
         pluginManager.uninstall("server_media")
+        setServerRemoved(url, false)
         pluginManager.upsert(serverId, label, url)
         settingsRepository.saveSignIn(serverId, username.trim(), password)
         if (serverId == FIRST_SERVER_ID) {
@@ -2748,6 +2753,7 @@ class MainViewModel(
     }
 
     fun onRemoveServer(id: String) {
+        pluginManager.servers().firstOrNull { it.id == id }?.let { setServerRemoved(it.baseUrl, true) }
         pluginManager.uninstall(id)
         settingsRepository.forgetSignIn(id)
         if (id == FIRST_SERVER_ID) settingsRepository.serverHost = ""
@@ -2768,6 +2774,19 @@ class MainViewModel(
             serverHost = libraryServerUrl().orEmpty()
         )
         refreshServerLibrary()
+    }
+
+    private fun serverUrlKey(url: String): String = url.trim().trimEnd('/').lowercase()
+
+    private fun removedServerUrls(): Set<String> =
+        settingsRepository.removedServerUrlsCsv.split(',').filter { it.isNotBlank() }.toSet()
+
+    private fun setServerRemoved(url: String, removed: Boolean) {
+        val key = serverUrlKey(url)
+        if (key.isBlank()) return
+        val current = removedServerUrls()
+        val next = if (removed) current + key else current - key
+        if (next != current) settingsRepository.removedServerUrlsCsv = next.joinToString(",")
     }
 
     private fun serverLabel(url: String): String =

@@ -123,6 +123,10 @@ class SettingsRepository(private val settings: Settings = Settings()) {
         get() = settings.getBoolean(KEY_LOCAL_FOLDER_PROMPTED, false)
         set(value) = settings.putBoolean(KEY_LOCAL_FOLDER_PROMPTED, value)
 
+    var removedServerUrlsCsv: String
+        get() = settings.getString(KEY_REMOVED_SERVERS, "")
+        set(value) = settings.putString(KEY_REMOVED_SERVERS, value)
+
     var settingsOrderCsv: String
         get() = settings.getString(KEY_SETTINGS_ORDER, "")
         set(value) = settings.putString(KEY_SETTINGS_ORDER, value)
@@ -182,6 +186,7 @@ class SettingsRepository(private val settings: Settings = Settings()) {
         const val KEY_DEFAULT_SERVER_DIR = "default_server_dir"
         const val KEY_LOCAL_FOLDER_PROMPTED = "local_folder_prompted"
         const val KEY_SETTINGS_ORDER = "settings_order"
+        const val KEY_REMOVED_SERVERS = "removed_servers"
         const val KEY_SETTINGS_LOCKED = "settings_locked"
         const val KEY_SYNC_AUTO = "sync_auto"
         const val KEY_SYNC_THEME = "sync_theme"

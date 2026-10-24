@@ -811,6 +811,7 @@ class NetworkRepository(
     suspend fun downloadAudioBytes(url: String): ByteArray {
         val pieces = mutableListOf<ByteArray>()
         var position = 0L
+        var expected: Long? = null
         while (true) {
             val response = try {
                 client.get(url) {
@@ -830,7 +831,15 @@ class NetworkRepository(
             position += piece.size
             if (response.status != HttpStatusCode.PartialContent) break
             val total = response.headers[HttpHeaders.ContentRange]?.substringAfterLast('/')?.toLongOrNull()
-            if (piece.size < AUDIO_PIECE_BYTES || (total != null && position >= total)) break
+            if (total != null) {
+                expected = total
+                if (position >= total || piece.isEmpty()) break
+            } else if (piece.size < AUDIO_PIECE_BYTES) {
+                break
+            }
+        }
+        expected?.let { total ->
+            if (position < total) error("Download stopped early ($position of $total bytes). Try again.")
         }
         if (pieces.size == 1) return pieces[0]
         val all = ByteArray(pieces.sumOf { it.size })
