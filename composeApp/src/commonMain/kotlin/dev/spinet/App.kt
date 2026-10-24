@@ -128,7 +128,16 @@ fun App(
     }
 
     val state by viewModel.uiState.collectAsState()
-    val canFindVersions = state.sources.any { it.kind == SourceKind.EXTENSION && it.enabled }
+    val canFindVersions = state.sources.any { source ->
+        source.enabled && when (source.kind) {
+            SourceKind.SERVER -> true
+            SourceKind.EXTENSION -> pluginManager.extensions.sources.any {
+                dev.spinet.extensions.EXTENSION_PLUGIN_PREFIX + it.id == source.id &&
+                    dev.spinet.extension.Capability.SEARCH in it.capabilities
+            }
+            else -> false
+        }
+    }
     val extensionRepositories = remember {
         dev.spinet.extensions.extensionPlatform?.let {
             dev.spinet.extensions.ExtensionRepositories(
