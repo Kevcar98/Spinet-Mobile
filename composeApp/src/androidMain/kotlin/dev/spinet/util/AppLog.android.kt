@@ -100,7 +100,7 @@ internal object AppLog {
         private val line = java.io.ByteArrayOutputStream()
 
         override fun write(b: Int) {
-            screen.write(b)
+            runCatching { screen.write(b) }
             synchronized(line) {
                 line.write(b)
                 if (b == 10) writeLine()
@@ -108,7 +108,7 @@ internal object AppLog {
         }
 
         override fun write(b: ByteArray, off: Int, len: Int) {
-            screen.write(b, off, len)
+            runCatching { screen.write(b, off, len) }
             synchronized(line) {
                 for (i in off until off + len) {
                     line.write(b[i].toInt())
@@ -118,7 +118,7 @@ internal object AppLog {
         }
 
         override fun flush() {
-            screen.flush()
+            runCatching { screen.flush() }
             runCatching { file.flush() }
         }
 

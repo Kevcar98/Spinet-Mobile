@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.HideImage
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
@@ -59,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import dev.spinet.model.Playlist
 import dev.spinet.model.SourcePlugin
 import dev.spinet.ui.rememberJsonOpener
+import dev.spinet.ui.rememberImagePicker
 import dev.spinet.ui.rememberJsonSaver
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -79,6 +82,7 @@ fun LibraryScreen(
     onCreatePlaylist: (String) -> Unit,
     onImportPlaylist: (String) -> Unit,
     onRenamePlaylist: (String, String) -> Unit = { _, _ -> },
+    onSetPlaylistImage: (String, String) -> Unit = { _, _ -> },
     onDeletePlaylist: (String) -> Unit = {},
     onMovePlaylist: (Int, Int) -> Unit = { _, _ -> },
 
@@ -95,6 +99,8 @@ fun LibraryScreen(
 ) {
     val saveJson = rememberJsonSaver()
     val importPlaylist = rememberJsonOpener(onImportPlaylist)
+    var pictureTarget by remember { mutableStateOf<String?>(null) }
+    val pickPicture = rememberImagePicker { path -> pictureTarget?.let { onSetPlaylistImage(it, path) } }
     var newName by remember { mutableStateOf("") }
 
     var creating by remember { mutableStateOf(false) }
@@ -291,7 +297,11 @@ fun LibraryScreen(
                                 )
                             )
                             Spacer(Modifier.width(8.dp))
-                            Icon(Icons.Filled.PlaylistPlay, contentDescription = null)
+                            if (playlist.imageUrl.isNotBlank()) {
+                                TrackThumbnail(playlist.imageUrl, size = 40.dp)
+                            } else {
+                                Icon(Icons.Filled.PlaylistPlay, contentDescription = null)
+                            }
                         }
                     },
                     headlineContent = { Text(playlist.name) },
@@ -321,6 +331,22 @@ fun LibraryScreen(
                                         renameTarget = playlist
                                     }
                                 )
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Filled.Image, null) },
+                                    text = { Text("Change picture") },
+                                    onClick = {
+                                        menuOpen = false
+                                        pictureTarget = playlist.id
+                                        pickPicture()
+                                    }
+                                )
+                                if (playlist.imageUrl.isNotBlank()) {
+                                    DropdownMenuItem(
+                                        leadingIcon = { Icon(Icons.Filled.HideImage, null) },
+                                        text = { Text("Remove picture") },
+                                        onClick = { menuOpen = false; onSetPlaylistImage(playlist.id, "") }
+                                    )
+                                }
                                 DropdownMenuItem(
                                     leadingIcon = { Icon(Icons.Filled.Download, null) },
                                     text = { Text("Download to device") },

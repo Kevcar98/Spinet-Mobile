@@ -7,6 +7,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -89,12 +92,14 @@ fun SettingsScreen(
     playlistImportStatus: String?,
     playlistImportPreview: PlaylistImportResult?,
     onImportPlaylistLink: (String) -> Unit,
-    onImportCsvPlaylist: (String) -> Unit,
+    onImportCsvPlaylist: (name: String, text: String) -> Unit,
     onConfirmPlaylistImport: (String) -> Unit,
     onCancelPlaylistImport: () -> Unit,
     onExperimentalToggle: (Boolean) -> Unit,
     highQualityArt: Boolean,
     onHighQualityArtToggle: (Boolean) -> Unit,
+    keepPlaying: Boolean = true,
+    onKeepPlayingToggle: (Boolean) -> Unit = {},
     serverHost: String,
     servers: List<ServerEntry> = emptyList(),
     serverConfigStatus: String?,
@@ -142,7 +147,7 @@ fun SettingsScreen(
     val syncAvailable = serverHost.isNotBlank()
 
     val defaultOrder = listOf(
-        "updates", "appearance", "server", "local", "sources", "import_export",
+        "updates", "appearance", "playback", "server", "local", "sources", "import_export",
         "csv"
     )
 
@@ -173,6 +178,7 @@ fun SettingsScreen(
                 onMoveDown = { move(index, index + 1) }
             ) {
                 when (key) {
+                    "playback" -> KeepPlayingCard(enabled = keepPlaying, onToggle = onKeepPlayingToggle)
                     "appearance" -> {
                         HighQualityArtCard(enabled = highQualityArt, onToggle = onHighQualityArtToggle)
                         ThemesCard(
@@ -321,6 +327,7 @@ private fun UpdatesCard(
 
 private fun sectionTitleFor(key: String): String = when (key) {
     "appearance" -> "Appearance"
+    "playback" -> "Playback"
     "server" -> "My Servers"
     "local" -> "Local music"
     "sources" -> "Sources"
@@ -377,6 +384,31 @@ private fun LayoutLockCard(locked: Boolean, onToggleLock: (Boolean) -> Unit) {
             }
             Spacer(Modifier.width(12.dp))
             Switch(checked = locked, onCheckedChange = onToggleLock)
+        }
+    }
+}
+
+@Composable
+private fun KeepPlayingCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    ElevatedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.Autorenew,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Keep playing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = if (enabled) "When the queue runs out, similar songs are added: from your library, and from switched-on extensions that suggest music."
+                        else "Playback stops at the end of the queue.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(checked = enabled, onCheckedChange = onToggle)
         }
     }
 }
@@ -631,7 +663,7 @@ private fun SourceRow(
 
     if (showSettings && settings != null) {
         ExtensionSettingsDialog(
-            title = plugin.name,
+            title = "${plugin.name} settings",
             settings = settings,
             onDismiss = { showSettings = false },
             onSave = { onSaveSettings(it); showSettings = false }
@@ -1123,7 +1155,7 @@ private fun CsvImportCard(
     status: String?,
     preview: PlaylistImportResult?,
     onImportLink: (String) -> Unit,
-    onImportCsv: (String) -> Unit,
+    onImportCsv: (name: String, text: String) -> Unit,
     onConfirm: (String) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -1154,7 +1186,7 @@ private fun CsvImportCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            OpenCsvFileButton(label = "Load CSV file") { text -> onImportCsv(text) }
+            OpenCsvFileButton(label = "Load CSV file", onFileRead = onImportCsv)
 
             if (status != null) {
                 StatusText(status, status.startsWith("✓") || status.startsWith("Matched"))
@@ -1180,11 +1212,39 @@ private fun CsvImportCard(
             }
 
             if (preview != null) {
-                Text(
-                    text = preview.matched.joinToString("\n") { "• ${it.title} - ${it.artist}" }
-                        .ifBlank { "No matches found." },
-                    style = MaterialTheme.typography.bodySmall
-                )
+                if (preview.matched.isEmpty()) {
+                    Text("No matches found.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                    ) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                        ) {
+                            itemsIndexed(preview.matched) { _, track ->
+                                Text(
+                                    text = if (track.artist.isBlank()) track.title else "${track.title} - ${track.artist}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        FastScrollbar(
+                            listState = listState,
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = playlistName,
                     onValueChange = { playlistName = it },
@@ -1244,48 +1304,6 @@ private fun SyncToggleCard(
             Switch(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
         }
     }
-}
-
-@Composable
-private fun ExtensionSettingsDialog(
-    title: String,
-    settings: dev.spinet.extensions.ExtensionSettingsUi,
-    onDismiss: () -> Unit,
-    onSave: (Map<String, String>) -> Unit
-) {
-    val values = remember(settings) {
-        androidx.compose.runtime.mutableStateMapOf<String, String>().apply { putAll(settings.values) }
-    }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("$title settings") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                settings.fields.forEach { field ->
-                    OutlinedTextField(
-                        value = values[field.key].orEmpty(),
-                        onValueChange = { values[field.key] = it },
-                        singleLine = true,
-                        label = { Text(field.label) },
-                        placeholder = { if (field.hint.isNotBlank()) Text(field.hint) },
-                        visualTransformation = if (field.secret) {
-                            androidx.compose.ui.text.input.PasswordVisualTransformation()
-                        } else {
-                            androidx.compose.ui.text.input.VisualTransformation.None
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Text(
-                    "Kept on this device and given only to this source.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = { onSave(values.toMap()) }) { Text("Save") } },
-        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
 }
 
 @Composable

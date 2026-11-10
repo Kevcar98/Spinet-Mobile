@@ -79,6 +79,8 @@ import dev.spinet.ui.screens.LocalMusicScreen
 import dev.spinet.ui.screens.NowPlayingScreen
 import dev.spinet.ui.screens.PlaylistDetailScreen
 import dev.spinet.ui.screens.SearchScreen
+import dev.spinet.ui.screens.ExploreScreen
+import dev.spinet.ui.screens.PlaybackErrorBanner
 import dev.spinet.ui.screens.SettingsScreen
 import dev.spinet.ui.screens.SupportScreen
 import dev.spinet.ui.screens.TrackThumbnail
@@ -426,6 +428,9 @@ fun App(
             },
             bottomBar = {
                 Column {
+                    state.playbackError?.let { message ->
+                        PlaybackErrorBanner(message = message, onDismiss = viewModel::onDismissPlaybackError)
+                    }
                     TransferBar(
                         progress = state.transferProgress,
                         label = state.transferLabel?.let { base ->
@@ -518,6 +523,26 @@ fun App(
                     modifier = contentModifier
                 )
 
+                Destination.Explore -> ExploreScreen(
+                    sources = remember(state.sources) { viewModel.exploreSources() },
+                    loadForYou = viewModel::forYouShelves,
+                    loadPage = viewModel::explore,
+                    foldersAsGrid = state.exploreGrid,
+                    onToggleFolderLayout = viewModel::onToggleExploreGrid,
+                    folderSettingsFor = viewModel::folderSettings,
+                    onSaveFolderSettings = viewModel::onSaveFolderSettings,
+                    serverTargets = browsableSources,
+                    onSaveToLibrary = { name, tracks, image -> viewModel.onSavePlaylistToLibrary(name, tracks, image) },
+                    onDownloadAll = { name, tracks -> viewModel.onDownloadPlaylistToDevice(tracks, name) },
+                    onUploadAll = { name, tracks, baseUrl -> viewModel.onUploadPlaylistToServer(tracks, baseUrl, name) },
+                    favoriteTrackIds = state.favoriteTrackIds,
+                    onPlay = onRowClick,
+                    onToggleFavorite = viewModel::onToggleFavorite,
+                    onAddToPlaylist = { addTarget = it },
+                    onPickVersion = if (canFindVersions) { track -> viewModel.onPickVersion(track) } else null,
+                    modifier = contentModifier
+                )
+
                 Destination.Library -> {
                     val browsing = browseSource
                     val detail = libraryDetail
@@ -606,6 +631,7 @@ fun App(
                             onCreatePlaylist = viewModel::onCreatePlaylist,
                             onImportPlaylist = viewModel::onImportPlaylist,
                             onRenamePlaylist = viewModel::onRenamePlaylist,
+                            onSetPlaylistImage = viewModel::onSetPlaylistImage,
                             onDeletePlaylist = viewModel::onDeletePlaylist,
                             onMovePlaylist = viewModel::onMovePlaylist,
                             onDownloadPlaylist = { pl ->
@@ -776,6 +802,7 @@ fun App(
                             } else {
                                 PlaylistDetailScreen(
                                     title = playlist.name,
+                                    imageUrl = playlist.imageUrl,
                                     tracks = playlist.tracks,
                                     favoriteTrackIds = state.favoriteTrackIds,
                                     isFavoritesList = false,
@@ -841,7 +868,7 @@ fun App(
                     playlistImportStatus = state.playlistImportStatus,
                     playlistImportPreview = state.playlistImportPreview,
                     onImportPlaylistLink = viewModel::onImportPlaylistLink,
-                    onImportCsvPlaylist = { csv -> viewModel.onImportCsvPlaylist(csv) },
+                    onImportCsvPlaylist = { name, csv -> viewModel.onImportCsvPlaylist(csv, name) },
                     serverHost = state.serverHost,
                     servers = state.servers,
                     serverConfigStatus = state.serverConfigStatus,
@@ -873,6 +900,8 @@ fun App(
                     onExperimentalToggle = viewModel::onExperimentalPluginToggled,
                     highQualityArt = state.highQualityArt,
                     onHighQualityArtToggle = viewModel::onHighQualityArtToggled,
+                    keepPlaying = state.keepPlaying,
+                    onKeepPlayingToggle = viewModel::onKeepPlayingToggled,
                     onToggleSource = viewModel::onToggleSource,
                     onInstallSource = viewModel::onInstallSource,
                     onUninstallSource = { id ->

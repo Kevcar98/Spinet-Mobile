@@ -34,5 +34,6 @@ fun ExtensionScan.withoutDuplicateIds(): ExtensionScan {
 
 data class ExtensionSettingsUi(
     val fields: List<dev.spinet.extension.SettingField>,
-    val values: Map<String, String>
+    val values: Map<String, String>,
+    val choices: Map<String, List<dev.spinet.extension.SourceItem>> = emptyMap()
 )

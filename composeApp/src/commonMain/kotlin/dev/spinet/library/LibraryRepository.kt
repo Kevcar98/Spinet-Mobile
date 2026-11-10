@@ -76,6 +76,11 @@ class LibraryRepository(
         persistPlaylists()
     }
 
+    fun setPlaylistImage(id: String, imageUrl: String) {
+        playlists = playlists.map { if (it.id == id) it.copy(imageUrl = imageUrl.trim()) else it }.toMutableList()
+        persistPlaylists()
+    }
+
     fun movePlaylistTrack(playlistId: String, fromIndex: Int, toIndex: Int) {
         playlists = playlists.map { pl ->
             if (pl.id != playlistId) return@map pl

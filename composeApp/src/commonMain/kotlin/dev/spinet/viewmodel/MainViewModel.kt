@@ -23,6 +23,9 @@ import dev.spinet.data.BrowsePlaylistDto
 import dev.spinet.data.ImportedSource
 import dev.spinet.data.ImportedTheme
 import dev.spinet.data.NetworkRepository
+import dev.spinet.data.ExplorePage
+import dev.spinet.data.ExploreShelf
+import dev.spinet.data.ExploreSource
 import dev.spinet.data.nowEpochMillis
 import dev.spinet.data.PlaylistImportResult
 import dev.spinet.data.PluginBundle
@@ -137,6 +140,9 @@ data class AppUiState(
     val durationMs: Long = 0L,
     val experimentalPluginEnabled: Boolean = false,
     val highQualityArt: Boolean = true,
+    val keepPlaying: Boolean = true,
+    val exploreGrid: Boolean = true,
+    val playbackError: String? = null,
     val sources: List<SourcePlugin> = emptyList(),
     val backendTestStatus: String? = null,
     val themes: List<ThemeSpec> = emptyList(),
@@ -261,6 +267,8 @@ class MainViewModel(
             favoriteTrackIds = libraryRepository.favorites().map { it.id }.toSet(),
             experimentalPluginEnabled = settingsRepository.experimentalPluginEngineEnabled,
             highQualityArt = settingsRepository.highQualityArtEnabled,
+            keepPlaying = settingsRepository.keepPlaying,
+            exploreGrid = settingsRepository.exploreGrid,
             searchHistory = settingsRepository.searchHistoryRaw
                 .split("\n").map { it.trim() }.filter { it.isNotBlank() },
             sources = pluginManager.all(),
@@ -286,6 +294,14 @@ class MainViewModel(
         val SERVER_DOWN_FOR = kotlin.time.Duration.parse("2m")
 
         const val UPLOAD_RETRY_DELAY_MS = 3_000L
+
+        const val KEEP_PLAYING_DELAY_MS = 3_000L
+        const val PLAYBACK_ERROR_SHOWN_MS = 10_000L
+        const val KEEP_PLAYING_AHEAD = 2
+        const val KEEP_PLAYING_BATCH = 10
+        const val KEEP_PLAYING_RECENT = 30
+        const val FOR_YOU_COUNT = 24
+        const val FOR_YOU_SEEDS = 4
 
         const val SERVER_RECHECK_MS = 30_000L
 
@@ -1075,12 +1091,14 @@ class MainViewModel(
                 throw e
             } catch (e: SearchUnavailableException) {
                 _uiState.value = _uiState.value.copy(searchError = e.message)
+                showPlaybackError("Couldn't play \"${playTrack.title}\": ${e.message ?: "no audio found"}")
                 if (skipOnFailure) skipFailedTrack(playTrack, e.message)
             } catch (e: Exception) {
                 val detail = e.message ?: e.toString()
                 _uiState.value = _uiState.value.copy(
                     searchError = "${e::class.simpleName}: $detail"
                 )
+                showPlaybackError("Couldn't play \"${playTrack.title}\": ${e::class.simpleName}: $detail")
                 if (skipOnFailure) skipFailedTrack(playTrack, detail)
             }
         }
@@ -1090,6 +1108,8 @@ class MainViewModel(
     private var fallbackTried = false
 
     private val failedLocalIds = mutableSetOf<String>()
+
+    private val retiredCopyIds = mutableSetOf<String>()
 
     private fun onPlaybackError() {
         val cur = _uiState.value.currentTrack ?: return
@@ -1140,6 +1160,25 @@ class MainViewModel(
         }
     }
 
+    private var playbackErrorJob: Job? = null
+
+    private fun showPlaybackError(message: String) {
+        System.err.println("[Spinet] $message")
+        playbackErrorJob?.cancel()
+        _uiState.value = _uiState.value.copy(playbackError = message)
+        playbackErrorJob = viewModelScope.launch {
+            delay(PLAYBACK_ERROR_SHOWN_MS)
+            if (_uiState.value.playbackError == message) {
+                _uiState.value = _uiState.value.copy(playbackError = null)
+            }
+        }
+    }
+
+    fun onDismissPlaybackError() {
+        playbackErrorJob?.cancel()
+        _uiState.value = _uiState.value.copy(playbackError = null)
+    }
+
     private fun skipFailedTrack(track: Track, reason: String?) {
         pendingResumeSeekMs = 0L
         failedInARow++
@@ -1150,10 +1189,12 @@ class MainViewModel(
                 searchError = "Playback stopped: \"${track.title}\" wouldn't play" +
                     (reason?.let { ". $it" } ?: ".")
             )
+            showPlaybackError("Playback stopped: \"${track.title}\" wouldn't play" + (reason?.let { ". $it" } ?: "."))
             return
         }
         advance(auto = true)
         _uiState.value = _uiState.value.copy(searchError = "Skipped \"${track.title}\": it wouldn't play.")
+        showPlaybackError("Skipped \"${track.title}\": it wouldn't play" + (reason?.let { ". $it" } ?: "."))
     }
 
     fun onPlayClicked() {
@@ -1227,10 +1268,92 @@ class MainViewModel(
         start?.let { onTrackClicked(it, tracks, forceReload = true) }
     }
 
+    private var keepPlayingJob: Job? = null
+
+    private fun scheduleKeepPlaying() {
+        if (!_uiState.value.keepPlaying) return
+        keepPlayingJob?.cancel()
+        keepPlayingJob = viewModelScope.launch {
+            delay(KEEP_PLAYING_DELAY_MS)
+            topUpQueue()
+        }
+    }
+
+    private fun continueWithSuggestions(play: (Track) -> Unit) {
+        if (!_uiState.value.keepPlaying) return
+        keepPlayingJob?.cancel()
+        keepPlayingJob = viewModelScope.launch {
+            if (topUpQueue()) computeNext()?.let(play)
+        }
+    }
+
+    private suspend fun topUpQueue(): Boolean {
+        val s = _uiState.value
+        if (!s.keepPlaying || s.repeatMode != RepeatMode.OFF) return false
+        if (s.queue.size - s.queueIndex - 1 >= KEEP_PLAYING_AHEAD) return false
+        val seed = s.currentTrack ?: return false
+        val picks = suggestionsFor(seed, s.queue, KEEP_PLAYING_BATCH)
+        val now = _uiState.value
+        val known = now.queue.mapTo(HashSet()) { it.matchKey() }
+        val added = picks.filter { known.add(it.matchKey()) }
+        if (added.isEmpty()) return false
+        _uiState.value = now.copy(queue = now.queue + added)
+        preloadNext()
+        return true
+    }
+
+    private suspend fun suggestionsFor(seed: Track, avoid: List<Track>, count: Int): List<Track> {
+        val skip = HashSet<String>()
+        avoid.forEach { skip.add(it.matchKey()) }
+        historyWindow().takeLast(KEEP_PLAYING_RECENT).forEach { skip.add(it.matchKey()) }
+        skip.add(seed.matchKey())
+
+        val fromRelated = relatedOrEmpty(seed).iterator()
+        val fromLibrary = libraryPicks(seed).iterator()
+        val out = mutableListOf<Track>()
+        fun take(t: Track) {
+            if (out.size < count && skip.add(t.matchKey())) out += t
+        }
+        while (out.size < count && (fromRelated.hasNext() || fromLibrary.hasNext())) {
+            repeat(2) { if (fromRelated.hasNext()) take(fromRelated.next()) }
+            if (fromLibrary.hasNext()) take(fromLibrary.next())
+        }
+        return out
+    }
+
+    private suspend fun relatedOrEmpty(seed: Track): List<Track> =
+        try {
+            repository.related(seed)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+    private fun libraryPicks(seed: Track): List<Track> {
+        val s = _uiState.value
+        val seedKey = seed.matchKey()
+        val artist = seed.artist.trim().lowercase()
+        val owned = s.favorites + s.playlists.flatMap { it.tracks } + s.localTracks +
+            playStats.values.map { it.track }
+        val sameArtist = if (artist.isBlank()) emptyList()
+            else owned.filter { it.artist.trim().lowercase() == artist }
+        val playlistMates = s.playlists
+            .filter { pl -> pl.tracks.any { it.matchKey() == seedKey } }
+            .flatMap { it.tracks }
+        val mostPlayed = playStats.values.filter { it.count > 0 }
+            .sortedByDescending { it.count }
+            .take(50)
+            .map { it.track }
+        return (playlistMates.shuffled() + sameArtist.shuffled() + s.favorites.shuffled() + mostPlayed.shuffled())
+            .distinctBy { it.matchKey() }
+    }
+
     private fun recordPlay(track: Track) {
         val key = songMatchKey(track)
         val current = _uiState.value.currentTrack
         if (current != null && songMatchKey(current) == key) return
+        scheduleKeepPlaying()
         val prev = playStats[key]
         playStats[key] = PlayStat((prev?.count ?: 0) + 1, track, prev?.resetAt ?: 0)
         runCatching { settingsRepository.playStatsJson = statsJson.encodeToString(playStats) }
@@ -1352,7 +1475,10 @@ class MainViewModel(
     }
 
     private fun advance(auto: Boolean) {
-        val next = computeNext() ?: return
+        val next = computeNext() ?: return continueWithSuggestions { suggested ->
+            advancingOnItsOwn = auto
+            onTrackClicked(suggested, _uiState.value.queue, forceReload = true, preserveOrder = true)
+        }
         advancingOnItsOwn = auto
         onTrackClicked(next, _uiState.value.queue, forceReload = true, preserveOrder = true)
     }
@@ -1402,7 +1528,7 @@ class MainViewModel(
         val state = _uiState.value
 
         fun localMatch(match: (Track) -> Boolean): Track? =
-            state.localTracks.firstOrNull { match(it) && it.id !in failedLocalIds }
+            state.localTracks.firstOrNull { match(it) && it.id !in failedLocalIds && it.id !in retiredCopyIds }
 
         val onDevice = localMatch { key(it) == wanted }
 
@@ -1431,12 +1557,12 @@ class MainViewModel(
         if (track.serverBaseUrl.isNotBlank()) return track
         val wanted = songMatchKey(track)
 
-        serverCopyFor(wanted)?.let { return it }
+        serverCopyFor(wanted)?.takeIf { it.id !in retiredCopyIds }?.let { return it }
         val state = _uiState.value
         val owned = (state.favorites +
             state.playlists.flatMap { it.tracks } +
             state.browseTracks)
-            .firstOrNull { songMatchKey(it) == wanted && it.serverBaseUrl.isNotBlank() }
+            .firstOrNull { songMatchKey(it) == wanted && it.serverBaseUrl.isNotBlank() && it.id !in retiredCopyIds }
         return owned ?: track
     }
 
@@ -1463,7 +1589,7 @@ class MainViewModel(
         if (track.source == TrackSource.LOCAL) return track
         val wanted = songMatchKey(track)
         return _uiState.value.localTracks
-            .firstOrNull { songMatchKey(it) == wanted } ?: track
+            .firstOrNull { songMatchKey(it) == wanted && it.id !in retiredCopyIds } ?: track
     }
 
     private var suppressHistoryPush = false
@@ -2038,6 +2164,11 @@ class MainViewModel(
 
     fun onChooseVersion(chosen: Track) {
         val original = _uiState.value.versionPickerFor ?: return
+        val oldLocal = preferLocalCopy(original, allowLooseMatch = false)
+            .takeIf { it.source == TrackSource.LOCAL && chosen.source != TrackSource.LOCAL }
+        val oldServer = preferServerCopy(original)
+            .takeIf { it.serverBaseUrl.isNotBlank() && chosen.serverBaseUrl.isBlank() }
+        retiredCopyIds += listOfNotNull(oldLocal?.id, oldServer?.id)
 
         val merged = chosen.copy(
             title = original.title,
@@ -2060,37 +2191,59 @@ class MainViewModel(
         )
         refreshLibrary()
 
-        val wasLocal = original.source == TrackSource.LOCAL
-        val serverUrl = original.serverBaseUrl
-        when {
-            wasLocal -> {
-                enqueueTransfer {
-                    beginTransfer("Replacing download…")
-                    val status = try {
-                        runCatching { deleteLocalTrack(original.streamUrl) }
-                        _uiState.value = _uiState.value.copy(
-                            localTracks = _uiState.value.localTracks.filterNot { it.id == original.id }
-                        )
-                        val r = saveTrackToDevice(merged, subfolder = "") { p -> updateTransferProgress(p) }
-                        refreshLocalTracks()
-                        when (r) {
-                            is DownloadResult.Success -> "Replaced the downloaded version."
-                            is DownloadResult.Error -> "✗ ${r.message}"
-                        }
-                    } catch (e: Exception) {
-                        "✗ ${e.message ?: e}"
+        replaceSavedCopies(merged, oldLocal, oldServer)
+    }
+
+    private fun replaceSavedCopies(replacement: Track, oldLocal: Track?, oldServer: Track?) {
+        if (oldLocal == null && oldServer == null) return
+        enqueueTransfer {
+            beginTransfer("Replacing saved copies…")
+            val problems = mutableListOf<String>()
+            if (oldLocal != null) {
+                var removed = false
+                try {
+                    if (repository.resolveExtensionDownload(replacement) == null) resolveDownloadUrl(replacement)
+                    var deleted = false
+                    for (attempt in 0 until 5) {
+                        deleted = runCatching { deleteLocalTrack(oldLocal.streamUrl) }.getOrDefault(false)
+                        if (deleted) break
+                        delay(200)
                     }
-                    finishTransfer(status)
+                    if (!deleted) throw IllegalStateException("the old file couldn't be removed")
+                    removed = true
+                    _uiState.value = _uiState.value.copy(
+                        localTracks = _uiState.value.localTracks.filterNot { it.id == oldLocal.id }
+                    )
+                    val result = saveTrackToDevice(replacement, subfolder = oldLocal.localFolder) { p ->
+                        updateTransferProgress(p)
+                    }
+                    when (result) {
+                        is DownloadResult.Success -> retiredCopyIds.remove(oldLocal.id)
+                        is DownloadResult.Error -> problems += "on this device (${result.message})"
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    problems += "on this device (${failureReason(e)})"
+                }
+                if (!removed) retiredCopyIds.remove(oldLocal.id)
+                runCatching { scanLocalTracks(showLoading = false) }
+            }
+            if (oldServer != null) {
+                val failure = uploadOneToServer(preferLocalFile(replacement), oldServer.serverBaseUrl, "")
+                if (failure == null) {
+                    runCatching { repository.deleteFromServer(oldServer.serverBaseUrl, oldServer.itemId) }
+                    markOnServer(replacement, oldServer.serverBaseUrl)
+                    refreshServerLibrary()
+                } else {
+                    retiredCopyIds.remove(oldServer.id)
+                    problems += "on the server (${failure.reason})"
                 }
             }
-
-            serverUrl.isNotBlank() -> {
-                viewModelScope.launch {
-                    runCatching { repository.deleteFromServer(serverUrl, original.itemId) }
-
-                    onUploadPlaylistToServer(listOf(merged), serverUrl, preferLocal = false)
-                }
-            }
+            finishTransfer(
+                if (problems.isEmpty()) "Saved copies now use the new version."
+                else "✗ Couldn't replace the saved copy ${problems.joinToString(" or ")}."
+            )
         }
     }
 
@@ -2600,6 +2753,11 @@ class MainViewModel(
         refreshLibrary()
     }
 
+    fun onSetPlaylistImage(id: String, imageUrl: String) {
+        libraryRepository.setPlaylistImage(id, imageUrl)
+        refreshLibrary()
+    }
+
     fun onRenamePlaylist(id: String, newName: String) {
         libraryRepository.renamePlaylist(id, newName)
         refreshLibrary()
@@ -2678,9 +2836,70 @@ class MainViewModel(
         _uiState.value = _uiState.value.copy(highQualityArt = enabled)
     }
 
+    fun onKeepPlayingToggled(enabled: Boolean) {
+        settingsRepository.keepPlaying = enabled
+        _uiState.value = _uiState.value.copy(keepPlaying = enabled)
+        if (enabled) scheduleKeepPlaying() else keepPlayingJob?.cancel()
+    }
+
+    fun exploreSources(): List<ExploreSource> = repository.exploreSources()
+
+    fun onToggleExploreGrid() {
+        val next = !_uiState.value.exploreGrid
+        settingsRepository.exploreGrid = next
+        _uiState.value = _uiState.value.copy(exploreGrid = next)
+    }
+
+    suspend fun explore(pluginId: String, parentId: String?): ExplorePage =
+        repository.explore(pluginId, parentId)
+
+    suspend fun forYouShelves(): List<ExploreShelf> = coroutineScope {
+        val recent = historyWindow().takeLast(KEEP_PLAYING_RECENT).mapTo(HashSet()) { it.matchKey() }
+        val ranked = playStats.values.filter { it.count > 0 }.sortedByDescending { it.count }.map { it.track }
+        val seeds = (listOfNotNull(playHistory.lastOrNull()) + ranked + _uiState.value.favorites)
+            .filter { it.artist.isNotBlank() || it.title.isNotBlank() }
+            .distinctBy { it.artist.trim().lowercase() }
+            .take(FOR_YOU_SEEDS)
+        if (seeds.isEmpty()) return@coroutineScope emptyList()
+
+        fun fresh(list: List<Track>) = list.filter { it.matchKey() !in recent }.distinctBy { it.matchKey() }
+        val related = seeds.map { seed -> async { seed to fresh(relatedOrEmpty(seed)) } }.awaitAll()
+
+        val sources = related.map { it.second.iterator() } + fresh(libraryPicks(seeds.first())).iterator()
+        val seen = HashSet<String>()
+        val mixed = mutableListOf<Track>()
+        while (mixed.size < FOR_YOU_COUNT && sources.any { it.hasNext() }) {
+            sources.forEach { source ->
+                if (source.hasNext() && mixed.size < FOR_YOU_COUNT) {
+                    val t = source.next()
+                    if (seen.add(t.matchKey())) mixed += t
+                }
+            }
+        }
+        val rediscover = (ranked + _uiState.value.favorites)
+            .filter { it.matchKey() !in recent }
+            .distinctBy { it.matchKey() }
+            .shuffled()
+            .take(FOR_YOU_COUNT)
+
+        buildList {
+            if (mixed.isNotEmpty()) add(ExploreShelf("Mixed for you", mixed))
+            related.forEach { (seed, songs) ->
+                if (songs.isNotEmpty()) add(ExploreShelf("Because you played ${seed.title}", songs.take(FOR_YOU_COUNT)))
+            }
+            if (rediscover.isNotEmpty()) add(ExploreShelf("Rediscover", rediscover))
+        }
+    }
+
     fun onToggleSource(id: String, enabled: Boolean) {
         pluginManager.setEnabled(id, enabled)
         _uiState.value = _uiState.value.copy(sources = pluginManager.all(), servers = serverEntries(), serverHost = libraryServerUrl().orEmpty())
+    }
+
+    fun folderSettings(pluginId: String, folderId: String) = pluginManager.folderSettings(pluginId, folderId)
+
+    fun onSaveFolderSettings(pluginId: String, values: Map<String, String>) {
+        pluginManager.updateExtensionSettings(pluginId, values)
     }
 
     fun onSaveExtensionSettings(pluginId: String, values: Map<String, String>) {
@@ -2934,6 +3153,20 @@ class MainViewModel(
                 "✗ Nothing valid to import in that file."
             }
         )
+    }
+
+    fun onSavePlaylistToLibrary(name: String, tracks: List<Track>, imageUrl: String = "") {
+        if (tracks.isEmpty()) return
+        val taken = _uiState.value.playlists.map { it.name.lowercase() }.toSet()
+        val free = generateSequence(1) { it + 1 }
+            .map { if (it == 1) name.trim() else "${name.trim()} ($it)" }
+            .first { it.lowercase() !in taken }
+        val playlist = libraryRepository.createPlaylist(free) ?: return
+        libraryRepository.addTracksToPlaylist(playlist.id, tracks)
+        if (imageUrl.isNotBlank()) libraryRepository.setPlaylistImage(playlist.id, imageUrl)
+        refreshLibrary()
+        beginTransfer("Saving to your library")
+        finishTransfer("Added \"$free\" to your library with ${tracks.size} songs.")
     }
 
     fun onConfirmPlaylistImport(playlistName: String) {

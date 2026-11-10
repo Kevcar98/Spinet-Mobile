@@ -55,7 +55,30 @@ class PluginManager(
         val source = extensions.sources.firstOrNull { it.id == id } ?: return null
         val fields = runCatching { source.settings }.getOrDefault(emptyList())
         if (fields.isEmpty()) return null
-        return ExtensionSettingsUi(fields, storedSettings()[id].orEmpty())
+        return ExtensionSettingsUi(fields, storedSettings()[id].orEmpty(), choicesFor(source, fields))
+    }
+
+    fun folderSettings(pluginId: String, folderId: String): ExtensionSettingsUi? {
+        val id = pluginId.removePrefix(EXTENSION_PLUGIN_PREFIX)
+        val source = extensions.sources.firstOrNull { it.id == id } ?: return null
+        val keys = runCatching { source.folderSettings(folderId) }.getOrDefault(emptyList())
+        if (keys.isEmpty()) return null
+        val fields = runCatching { source.settings }.getOrDefault(emptyList()).filter { it.key in keys }
+        if (fields.isEmpty()) return null
+        return ExtensionSettingsUi(fields, storedSettings()[id].orEmpty(), choicesFor(source, fields))
+    }
+
+    private fun choicesFor(
+        source: dev.spinet.extension.MusicSource,
+        fields: List<dev.spinet.extension.SettingField>
+    ): Map<String, List<dev.spinet.extension.SourceItem>> =
+        fields.associate { field ->
+            field.key to runCatching { source.settingChoices(field.key) }.getOrDefault(emptyList())
+        }.filterValues { it.isNotEmpty() }
+
+    fun updateExtensionSettings(pluginId: String, changes: Map<String, String>) {
+        val id = pluginId.removePrefix(EXTENSION_PLUGIN_PREFIX)
+        saveExtensionSettings(pluginId, storedSettings()[id].orEmpty() + changes)
     }
 
     fun saveExtensionSettings(pluginId: String, values: Map<String, String>) {

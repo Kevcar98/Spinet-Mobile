@@ -10,7 +10,7 @@ actual fun SaveJsonFileButton(label: String, suggestedName: String, content: () 
 }
 
 @Composable
-actual fun OpenCsvFileButton(label: String, onFileRead: (String) -> Unit) {
+actual fun OpenCsvFileButton(label: String, onFileRead: (name: String, text: String) -> Unit) {
     OutlinedButton(onClick = {}, enabled = false) { Text(label) }
 }
 
@@ -19,3 +19,6 @@ actual fun rememberJsonSaver(): (String, String) -> Unit = { _, _ -> }
 
 @Composable
 actual fun rememberJsonOpener(onFileRead: (String) -> Unit): () -> Unit = {}
+
+@Composable
+actual fun rememberImagePicker(onPicked: (path: String) -> Unit): () -> Unit = {}

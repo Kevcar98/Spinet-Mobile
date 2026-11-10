@@ -51,6 +51,8 @@ actual object TransferNotifier {
         .setContentText(text)
         .setOnlyAlertOnce(true)
         .setOngoing(ongoing)
+        .setContentIntent(openAppIntent(context))
+        .setAutoCancel(!ongoing)
         .apply {
             if (ongoing) {
                 if (fraction < 0f) setProgress(0, 0, true)
@@ -69,6 +71,14 @@ actual object TransferNotifier {
             }
         }
         .build()
+
+    private fun openAppIntent(context: Context): PendingIntent = PendingIntent.getActivity(
+        context,
+        0,
+        Intent(context, dev.spinet.MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
     @Volatile private var title: String = "Transfer"
 

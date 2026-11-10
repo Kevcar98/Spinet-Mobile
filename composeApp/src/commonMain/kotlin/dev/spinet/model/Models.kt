@@ -136,7 +136,8 @@ data class NowPlayingState(
 data class Playlist(
     val id: String,
     val name: String,
-    val tracks: List<Track> = emptyList()
+    val tracks: List<Track> = emptyList(),
+    val imageUrl: String = ""
 )
 
 @Serializable

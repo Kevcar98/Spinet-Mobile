@@ -97,7 +97,7 @@ class NetworkRepository(
 
     private fun extensionFor(pluginId: String): MusicSource? {
         val sourceId = pluginId.removePrefix(EXTENSION_PLUGIN_PREFIX)
-        return extensionSources().firstOrNull { it.id == sourceId }
+        return extensionSources().firstOrNull { it.id == sourceId }?.let(::GuardedSource)
     }
 
     private fun SourceTrack.toExtensionTrack(source: MusicSource) = Track(
@@ -113,6 +113,57 @@ class NetworkRepository(
         serverBaseUrl = "",
         sourceId = source.id
     )
+
+    fun exploreSources(): List<ExploreSource> =
+        enabledExtensions()
+            .filter { Capability.BROWSE in it.capabilities }
+            .map { ExploreSource(EXTENSION_PLUGIN_PREFIX + it.id, it.name) }
+
+    suspend fun explore(pluginId: String, parentId: String?): ExplorePage {
+        val ext = enabledExtensions().firstOrNull { EXTENSION_PLUGIN_PREFIX + it.id == pluginId }
+            ?: return ExplorePage()
+        val items = ext.browse(parentId)
+        val tracks = if (parentId != null) ext.browseTracks(parentId) else emptyList()
+        return ExplorePage(
+            folders = items.filter { it.isContainer }.map { ExploreFolder(it.id, it.name, it.artworkUrl) },
+            tracks = (tracks + items.filterNot { it.isContainer }.map {
+                SourceTrack(id = it.id, title = it.name, artworkUrl = it.artworkUrl)
+            }).map { it.toExtensionTrack(ext) }
+        )
+    }
+
+    suspend fun related(track: Track): List<Track> {
+        val extensions = enabledExtensions()
+        val own = extensions.firstOrNull { track.sourceId.isNotBlank() && it.id == track.sourceId }
+        if (own != null && track.itemId.isNotBlank()) {
+            val found = relatedFrom(own, track.itemId)
+            if (found.isNotEmpty()) return found
+        }
+        val query = listOf(track.artist, track.title).filter { it.isNotBlank() }.joinToString(" ")
+        if (query.isBlank()) return emptyList()
+        for (ext in extensions) {
+            if (ext === own || Capability.SEARCH !in ext.capabilities) continue
+            val hit = try {
+                ext.search(query, 1).firstOrNull()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            } ?: continue
+            val found = relatedFrom(ext, hit.id)
+            if (found.isNotEmpty()) return found
+        }
+        return emptyList()
+    }
+
+    private suspend fun relatedFrom(ext: MusicSource, trackId: String): List<Track> =
+        try {
+            ext.related(trackId).map { it.toExtensionTrack(ext) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
 
     @kotlinx.serialization.Serializable
     private data class MoveRequest(
@@ -221,11 +272,11 @@ class NetworkRepository(
         }
     }
 
-    suspend fun search(query: String, musicOnly: Boolean = true, extensionsOnly: Boolean = false): List<Track> {
+    suspend fun search(query: String, musicOnly: Boolean = true): List<Track> {
         if (query.isBlank()) return emptyList()
         val serverFilter = if (musicOnly) "music_songs" else "videos"
 
-        val enabledSources = sourcesProvider().filter { !extensionsOnly || it.kind == SourceKind.EXTENSION }
+        val enabledSources = sourcesProvider()
         if (enabledSources.isEmpty()) {
             throw SearchUnavailableException(
                 "No sources enabled. Turn one on in Settings > Sources.",
@@ -920,4 +971,46 @@ class NetworkRepository(
 
         const val MIN_COMPLETE_BYTES = 32L * 1024
     }
+}
+
+class ExtensionFailedException(name: String, cause: Throwable) :
+    Exception(
+        "$name stopped working (${cause::class.simpleName}${cause.message?.let { ": $it" } ?: ""}). Try updating it.",
+        cause
+    )
+
+private class GuardedSource(private val inner: MusicSource) : MusicSource {
+    override val id: String get() = inner.id
+    override val name: String get() = inner.name
+    override val versionCode: Int get() = inner.versionCode
+    override val apiVersion: Int get() = inner.apiVersion
+    override val capabilities: Set<Capability> get() = inner.capabilities
+    override val canRecognize: Boolean get() = guard { inner.canRecognize }
+    override val settings get() = guard { inner.settings }
+
+    override suspend fun search(query: String, page: Int) = guard { inner.search(query, page) }
+    override suspend fun resolve(trackId: String) = guard { inner.resolve(trackId) }
+    override suspend fun browse(parentId: String?) = guard { inner.browse(parentId) }
+    override suspend fun browseTracks(parentId: String) = guard { inner.browseTracks(parentId) }
+    override suspend fun related(trackId: String) = guard { inner.related(trackId) }
+    override suspend fun track(trackId: String) = guard { inner.track(trackId) }
+    override suspend fun open(url: String) = guard { inner.open(url) }
+    override suspend fun resolveForDownload(trackId: String) = guard { inner.resolveForDownload(trackId) }
+    override suspend fun searchVersions(query: String) = guard { inner.searchVersions(query) }
+    override suspend fun openPlaylist(url: String) = guard { inner.openPlaylist(url) }
+    override suspend fun recognize(pcm: ShortArray, sampleRate: Int) = guard { inner.recognize(pcm, sampleRate) }
+    override fun applySettings(values: Map<String, String>) = guard { inner.applySettings(values) }
+    override fun settingChoices(key: String) = guard { inner.settingChoices(key) }
+    override fun folderSettings(folderId: String) = guard { inner.folderSettings(folderId) }
+
+    private inline fun <T> guard(block: () -> T): T =
+        try {
+            block()
+        } catch (e: Exception) {
+            throw e
+        } catch (e: Throwable) {
+            System.err.println("[Spinet] ${inner.name} failed")
+            e.printStackTrace()
+            throw ExtensionFailedException(inner.name, e)
+        }
 }
