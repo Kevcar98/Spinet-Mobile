@@ -55,6 +55,10 @@ class SettingsRepository(private val settings: Settings = Settings()) {
         get() = settings.getBoolean(KEY_EXPLORE_GRID, true)
         set(value) = settings.putBoolean(KEY_EXPLORE_GRID, value)
 
+    var exploreOrderCsv: String
+        get() = settings.getString(KEY_EXPLORE_ORDER, "")
+        set(value) = settings.putString(KEY_EXPLORE_ORDER, value)
+
     var searchHistoryRaw: String
         get() = settings.getString(KEY_SEARCH_HISTORY, "")
         set(value) = settings.putString(KEY_SEARCH_HISTORY, value)
@@ -175,6 +179,7 @@ class SettingsRepository(private val settings: Settings = Settings()) {
         const val KEY_HIGH_QUALITY_ART = "high_quality_art"
         const val KEY_KEEP_PLAYING = "keep_playing"
         const val KEY_EXPLORE_GRID = "explore_grid"
+        const val KEY_EXPLORE_ORDER = "explore_order"
         const val KEY_SEARCH_HISTORY = "search_history"
         const val KEY_PLAY_STATS = "play_stats"
         const val KEY_SOURCE_PLUGINS = "source_plugins"

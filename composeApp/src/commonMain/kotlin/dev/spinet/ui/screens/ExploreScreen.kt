@@ -24,6 +24,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Folder
@@ -34,6 +37,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -83,6 +87,8 @@ internal fun ExploreScreen(
     loadPage: suspend (pluginId: String, parentId: String?) -> ExplorePage,
     foldersAsGrid: Boolean,
     onToggleFolderLayout: () -> Unit,
+    sectionOrder: List<String>,
+    onReorderSections: (List<String>) -> Unit,
     folderSettingsFor: (pluginId: String, folderId: String) -> ExtensionSettingsUi?,
     onSaveFolderSettings: (pluginId: String, values: Map<String, String>) -> Unit,
     serverTargets: List<SourcePlugin>,
@@ -106,6 +112,8 @@ internal fun ExploreScreen(
             loadPage = loadPage,
             onOpenFolder = { source, folder -> stack = listOf(ExploreCrumb(source, folder.id, folder.name, folder.artworkUrl)) },
             onOpenSource = { stack = listOf(ExploreCrumb(it, null, it.name)) },
+            sectionOrder = sectionOrder,
+            onReorderSections = onReorderSections,
             onPlay = onPlay,
             modifier = modifier
         )
@@ -141,6 +149,8 @@ private fun ExploreHome(
     loadPage: suspend (pluginId: String, parentId: String?) -> ExplorePage,
     onOpenFolder: (ExploreSource, ExploreFolder) -> Unit,
     onOpenSource: (ExploreSource) -> Unit,
+    sectionOrder: List<String>,
+    onReorderSections: (List<String>) -> Unit,
     onPlay: (Track, List<Track>) -> Unit,
     modifier: Modifier
 ) {
@@ -170,36 +180,19 @@ private fun ExploreHome(
         }
     }
 
-    LazyColumn(modifier = modifier.fillMaxWidth()) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Recommended for you",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = { refresh++ }, enabled = shelves != null) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "New picks")
-                }
-            }
-        }
-        val loaded = shelves
-        when {
-            loaded == null -> item { LoadingRow() }
-            loaded.isEmpty() -> item {
-                Box(Modifier.padding(horizontal = 16.dp)) {
-                    HintText("Play some music first. Picks here come from what you listen to, your playlists and your likes.")
-                }
-            }
-            else -> items(loaded, key = { "shelf_${it.title}" }) { shelf ->
-                ShelfRow(shelf = shelf, onPlay = onPlay)
-            }
-        }
+    val sectionKeys = sources.map { it.pluginId } + FOR_YOU_SECTION
+    val ordered = (sectionOrder.filter { it in sectionKeys } + sectionKeys).distinct()
+    var reordering by remember { mutableStateOf(false) }
+    if (reordering) {
+        ReorderSectionsDialog(
+            keys = ordered,
+            nameOf = { key -> sources.firstOrNull { it.pluginId == key }?.name ?: "Recommended for you" },
+            onDismiss = { reordering = false },
+            onSave = { onReorderSections(it); reordering = false }
+        )
+    }
 
+    LazyColumn(modifier = modifier.fillMaxWidth()) {
         if (sources.isEmpty()) {
             item {
                 Box(Modifier.padding(16.dp)) {
@@ -207,36 +200,118 @@ private fun ExploreHome(
                 }
             }
         }
-        sources.forEach { source ->
-            item(key = "source_${source.pluginId}") {
-                Text(
-                    source.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 4.dp)
-                )
-            }
-            val folders = roots[source.pluginId]
-            when {
-                folders == null -> item(key = "loading_${source.pluginId}") { LoadingRow() }
-                folders.isEmpty() -> item(key = "open_${source.pluginId}") {
-                    ListItem(
-                        headlineContent = { Text("Browse ${source.name}") },
-                        leadingContent = { Icon(Icons.Filled.Explore, contentDescription = null) },
-                        modifier = Modifier.clickable { onOpenSource(source) }
-                    )
+        ordered.forEachIndexed { index, key ->
+            val top = if (index == 0) 8.dp else 24.dp
+            val reorder: (@Composable () -> Unit)? = if (index == 0 && ordered.size > 1) {
+                {
+                    IconButton(onClick = { reordering = true }) {
+                        Icon(Icons.Filled.SwapVert, contentDescription = "Change the order of these sections")
+                    }
                 }
-                else -> items(folders, key = { "root_${source.pluginId}_${it.id}" }) { folder ->
-                    ListItem(
-                        headlineContent = { Text(folder.name) },
-                        leadingContent = { ItemArt(folder.artworkUrl, size = 40.dp) },
-                        modifier = Modifier.clickable { onOpenFolder(source, folder) }
-                    )
+            } else null
+            if (key == FOR_YOU_SECTION) {
+                item(key = "foryou_title") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = top, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Recommended for you",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { refresh++ }, enabled = shelves != null) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "New picks")
+                        }
+                        reorder?.invoke()
+                    }
+                }
+                val loaded = shelves
+                when {
+                    loaded == null -> item(key = "foryou_loading") { LoadingRow() }
+                    loaded.isEmpty() -> item(key = "foryou_empty") {
+                        Box(Modifier.padding(horizontal = 16.dp)) {
+                            HintText("Play some music first. Picks here come from what you listen to, your playlists and your likes.")
+                        }
+                    }
+                    else -> items(loaded, key = { "shelf_${it.title}" }) { shelf ->
+                        ShelfRow(shelf = shelf, onPlay = onPlay)
+                    }
+                }
+            } else {
+                val source = sources.first { it.pluginId == key }
+                item(key = "source_${source.pluginId}") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = top, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            source.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        reorder?.invoke()
+                    }
+                }
+                val folders = roots[source.pluginId]
+                when {
+                    folders == null -> item(key = "loading_${source.pluginId}") { LoadingRow() }
+                    folders.isEmpty() -> item(key = "open_${source.pluginId}") {
+                        ListItem(
+                            headlineContent = { Text("Browse ${source.name}") },
+                            leadingContent = { Icon(Icons.Filled.Explore, contentDescription = null) },
+                            modifier = Modifier.clickable { onOpenSource(source) }
+                        )
+                    }
+                    else -> items(folders, key = { "root_${source.pluginId}_${it.id}" }) { folder ->
+                        ListItem(
+                            headlineContent = { Text(folder.name) },
+                            leadingContent = { ItemArt(folder.artworkUrl, size = 40.dp) },
+                            modifier = Modifier.clickable { onOpenFolder(source, folder) }
+                        )
+                    }
                 }
             }
         }
         item { Spacer(Modifier.size(24.dp)) }
     }
+}
+
+@Composable
+private fun ReorderSectionsDialog(
+    keys: List<String>,
+    nameOf: (String) -> String,
+    onDismiss: () -> Unit,
+    onSave: (List<String>) -> Unit
+) {
+    var order by remember(keys) { mutableStateOf(keys) }
+    fun move(from: Int, to: Int) {
+        if (to !in order.indices) return
+        order = order.toMutableList().apply { add(to, removeAt(from)) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Order of sections") },
+        text = {
+            Column {
+                order.forEachIndexed { index, key ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(nameOf(key), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { move(index, index - 1) }, enabled = index > 0) {
+                            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up")
+                        }
+                        IconButton(onClick = { move(index, index + 1) }, enabled = index < order.lastIndex) {
+                            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(order) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
@@ -289,6 +364,8 @@ private fun ShelfRow(shelf: ExploreShelf, onPlay: (Track, List<Track>) -> Unit) 
 }
 
 private val SHELF_CARD = 136.dp
+
+private const val FOR_YOU_SECTION = "for_you"
 
 private val BANNER_ART = 168.dp
 

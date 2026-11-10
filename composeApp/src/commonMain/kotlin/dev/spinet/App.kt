@@ -529,6 +529,8 @@ fun App(
                     loadPage = viewModel::explore,
                     foldersAsGrid = state.exploreGrid,
                     onToggleFolderLayout = viewModel::onToggleExploreGrid,
+                    sectionOrder = state.exploreOrder,
+                    onReorderSections = viewModel::onReorderExplore,
                     folderSettingsFor = viewModel::folderSettings,
                     onSaveFolderSettings = viewModel::onSaveFolderSettings,
                     serverTargets = browsableSources,

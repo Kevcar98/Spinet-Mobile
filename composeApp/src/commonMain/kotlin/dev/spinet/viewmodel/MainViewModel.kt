@@ -142,6 +142,7 @@ data class AppUiState(
     val highQualityArt: Boolean = true,
     val keepPlaying: Boolean = true,
     val exploreGrid: Boolean = true,
+    val exploreOrder: List<String> = emptyList(),
     val playbackError: String? = null,
     val sources: List<SourcePlugin> = emptyList(),
     val backendTestStatus: String? = null,
@@ -269,6 +270,7 @@ class MainViewModel(
             highQualityArt = settingsRepository.highQualityArtEnabled,
             keepPlaying = settingsRepository.keepPlaying,
             exploreGrid = settingsRepository.exploreGrid,
+            exploreOrder = settingsRepository.exploreOrderCsv.split(',').filter { it.isNotBlank() },
             searchHistory = settingsRepository.searchHistoryRaw
                 .split("\n").map { it.trim() }.filter { it.isNotBlank() },
             sources = pluginManager.all(),
@@ -2844,6 +2846,11 @@ class MainViewModel(
 
     fun exploreSources(): List<ExploreSource> = repository.exploreSources()
 
+    fun onReorderExplore(order: List<String>) {
+        settingsRepository.exploreOrderCsv = order.joinToString(",")
+        _uiState.value = _uiState.value.copy(exploreOrder = order)
+    }
+
     fun onToggleExploreGrid() {
         val next = !_uiState.value.exploreGrid
         settingsRepository.exploreGrid = next
@@ -2904,6 +2911,8 @@ class MainViewModel(
 
     fun onSaveExtensionSettings(pluginId: String, values: Map<String, String>) {
         pluginManager.saveExtensionSettings(pluginId, values)
+        autoPushSync()
+        autoPushSync()
         _uiState.value = _uiState.value.copy(sources = pluginManager.all(), servers = serverEntries(), serverHost = libraryServerUrl().orEmpty())
     }
 
