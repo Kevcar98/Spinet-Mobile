@@ -58,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -66,13 +67,14 @@ import androidx.compose.ui.unit.dp
 import dev.spinet.data.ExploreFolder
 import dev.spinet.data.ExplorePage
 import dev.spinet.data.ExploreShelf
+import dev.spinet.data.PlaylistHit
 import dev.spinet.data.ExploreSource
 import dev.spinet.extensions.ExtensionSettingsUi
 import dev.spinet.model.SourcePlugin
 import dev.spinet.model.Track
 import kotlinx.coroutines.CancellationException
 
-private data class ExploreCrumb(
+internal data class ExploreCrumb(
     val source: ExploreSource,
     val folderId: String?,
     val title: String,
@@ -80,8 +82,28 @@ private data class ExploreCrumb(
     val foldersOnly: Boolean = false
 )
 
+internal class ExploreNavState {
+    var stack by mutableStateOf(emptyList<ExploreCrumb>())
+
+    val canPop: Boolean get() = stack.isNotEmpty()
+
+    fun pop() {
+        stack = stack.dropLast(1)
+    }
+
+    fun openFolder(source: ExploreSource, folder: ExploreFolder) {
+        stack = listOf(ExploreCrumb(source, folder.id, folder.name, folder.artworkUrl))
+    }
+}
+
+@Composable
+internal fun rememberExploreNav(): ExploreNavState = remember { ExploreNavState() }
+
+internal val LocalShowRowArrows = staticCompositionLocalOf { true }
+
 @Composable
 internal fun ExploreScreen(
+    nav: ExploreNavState,
     sources: List<ExploreSource>,
     loadForYou: suspend () -> List<ExploreShelf>,
     loadPage: suspend (pluginId: String, parentId: String?) -> ExplorePage,
@@ -92,7 +114,7 @@ internal fun ExploreScreen(
     folderSettingsFor: (pluginId: String, folderId: String) -> ExtensionSettingsUi?,
     onSaveFolderSettings: (pluginId: String, values: Map<String, String>) -> Unit,
     serverTargets: List<SourcePlugin>,
-    onSaveToLibrary: (name: String, tracks: List<Track>, imageUrl: String) -> Unit,
+    onSaveToLibrary: (name: String, tracks: List<Track>, imageUrl: String, pluginId: String, folderId: String) -> Unit,
     onDownloadAll: (name: String, tracks: List<Track>) -> Unit,
     onUploadAll: (name: String, tracks: List<Track>, serverBaseUrl: String) -> Unit,
     favoriteTrackIds: Set<String>,
@@ -102,16 +124,15 @@ internal fun ExploreScreen(
     onPickVersion: ((Track) -> Unit)?,
     modifier: Modifier = Modifier
 ) {
-    var stack by remember { mutableStateOf(emptyList<ExploreCrumb>()) }
-    val crumb = stack.lastOrNull()
+    val crumb = nav.stack.lastOrNull()
 
     if (crumb == null) {
         ExploreHome(
             sources = sources,
             loadForYou = loadForYou,
             loadPage = loadPage,
-            onOpenFolder = { source, folder -> stack = listOf(ExploreCrumb(source, folder.id, folder.name, folder.artworkUrl)) },
-            onOpenSource = { stack = listOf(ExploreCrumb(it, null, it.name)) },
+            onOpenFolder = { source, folder -> nav.openFolder(source, folder) },
+            onOpenSource = { nav.stack = listOf(ExploreCrumb(it, null, it.name)) },
             sectionOrder = sectionOrder,
             onReorderSections = onReorderSections,
             onPlay = onPlay,
@@ -128,9 +149,9 @@ internal fun ExploreScreen(
             onDownloadAll = onDownloadAll,
             onUploadAll = onUploadAll,
             favoriteTrackIds = favoriteTrackIds,
-            onBack = { stack = stack.dropLast(1) },
-            onOpenFolder = { folder -> stack = stack + ExploreCrumb(crumb.source, folder.id, folder.name, folder.artworkUrl) },
-            onSeeAllFolders = { stack = stack + crumb.copy(title = "${crumb.title}: playlists", foldersOnly = true) },
+            onBack = { nav.pop() },
+            onOpenFolder = { folder -> nav.stack = nav.stack + ExploreCrumb(crumb.source, folder.id, folder.name, folder.artworkUrl) },
+            onSeeAllFolders = { nav.stack = nav.stack + crumb.copy(title = "${crumb.title}: playlists", foldersOnly = true) },
             foldersAsGrid = foldersAsGrid,
             onToggleFolderLayout = onToggleFolderLayout,
             onPlay = onPlay,
@@ -378,7 +399,7 @@ private fun ExploreFolderScreen(
     folderSettingsFor: (pluginId: String, folderId: String) -> ExtensionSettingsUi?,
     onSaveFolderSettings: (pluginId: String, values: Map<String, String>) -> Unit,
     serverTargets: List<SourcePlugin>,
-    onSaveToLibrary: (name: String, tracks: List<Track>, imageUrl: String) -> Unit,
+    onSaveToLibrary: (name: String, tracks: List<Track>, imageUrl: String, pluginId: String, folderId: String) -> Unit,
     onDownloadAll: (name: String, tracks: List<Track>) -> Unit,
     onUploadAll: (name: String, tracks: List<Track>, serverBaseUrl: String) -> Unit,
     favoriteTrackIds: Set<String>,
@@ -397,6 +418,9 @@ private fun ExploreFolderScreen(
     val bannerArt = crumb.artworkUrl.takeIf { it.startsWith("http") && !crumb.foldersOnly }.orEmpty()
     var page by remember(crumb) { mutableStateOf<ExplorePage?>(null) }
     var error by remember(crumb) { mutableStateOf<String?>(null) }
+    val gridEligible = crumb.foldersOnly || page?.let { p ->
+        p.tracks.isEmpty() && p.folders.isNotEmpty() && p.folders.all { it.artworkUrl.startsWith("http") }
+    } == true
     val folderSettings = remember(crumb, reload) {
         crumb.folderId?.takeUnless { crumb.foldersOnly }?.let { folderSettingsFor(crumb.source.pluginId, it) }
     }
@@ -464,7 +488,10 @@ private fun ExploreFolderScreen(
                             DropdownMenuItem(
                                 text = { Text("Save to my library") },
                                 leadingIcon = { Icon(Icons.Filled.LibraryAdd, contentDescription = null) },
-                                onClick = { menuOpen = false; onSaveToLibrary(crumb.title, tracks, bannerArt) }
+                                onClick = {
+                                    menuOpen = false
+                                    onSaveToLibrary(crumb.title, tracks, bannerArt, crumb.source.pluginId, crumb.folderId.orEmpty())
+                                }
                             )
                             if (tracks.any { it.downloadable }) {
                                 DropdownMenuItem(
@@ -483,7 +510,7 @@ private fun ExploreFolderScreen(
                         }
                     }
                 }
-                if (crumb.foldersOnly) {
+                if (gridEligible) {
                     IconButton(onClick = onToggleFolderLayout) {
                         Icon(
                             if (foldersAsGrid) Icons.Filled.ViewList else Icons.Filled.GridView,
@@ -555,7 +582,7 @@ private fun ExploreFolderScreen(
                     ExploreTrackRow(track, loaded.tracks, favoriteTrackIds, onPlay, onToggleFavorite, onAddToPlaylist, onPickVersion)
                 }
             }
-            crumb.foldersOnly && foldersAsGrid -> {
+            gridEligible && foldersAsGrid -> {
                 items(loaded.folders.chunked(gridColumns), key = { row -> "grid_${row.first().id}" }) { row ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
@@ -625,6 +652,7 @@ private fun ArrowRow(
 ) {
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val arrows = LocalShowRowArrows.current
     val step = with(LocalDensity.current) { (SHELF_CARD * 3).toPx() }
     Box(Modifier.fillMaxWidth()) {
         LazyRow(
@@ -633,7 +661,7 @@ private fun ArrowRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             content = content
         )
-        if (state.canScrollBackward) {
+        if (arrows && state.canScrollBackward) {
             FilledTonalIconButton(
                 onClick = { scope.launch { state.animateScrollBy(-step) } },
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 4.dp, top = SHELF_CARD / 2 - 20.dp)
@@ -641,7 +669,7 @@ private fun ArrowRow(
                 Icon(Icons.Filled.ChevronLeft, contentDescription = "Scroll left")
             }
         }
-        if (state.canScrollForward) {
+        if (arrows && state.canScrollForward) {
             FilledTonalIconButton(
                 onClick = { scope.launch { state.animateScrollBy(step) } },
                 modifier = Modifier.align(Alignment.TopEnd).padding(end = 4.dp, top = SHELF_CARD / 2 - 20.dp)
@@ -649,6 +677,33 @@ private fun ArrowRow(
                 Icon(Icons.Filled.ChevronRight, contentDescription = "Scroll right")
             }
         }
+    }
+}
+
+@Composable
+internal fun PlaylistResultsRow(hits: List<PlaylistHit>, onOpen: (PlaylistHit) -> Unit) {
+    if (hits.isEmpty()) return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle("Playlists")
+        ArrowRow {
+            items(hits, key = { "hit_${it.source.pluginId}_${it.folder.id}" }) { hit ->
+                Column(
+                    modifier = Modifier
+                        .width(SHELF_CARD)
+                        .clickable { onOpen(hit) }
+                ) {
+                    ItemArt(hit.folder.artworkUrl, size = SHELF_CARD)
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        hit.folder.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+        SectionTitle("Songs")
     }
 }
 

@@ -323,7 +323,10 @@ fun NowPlayingScreen(
             Text(
                 text = track.artist,
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = LocalShowArtist.current?.let { show ->
+                    Modifier.clickable { show(track.artist) }
+                } ?: Modifier
             )
             Text(
                 text = playback.name,

@@ -25,6 +25,7 @@ import dev.spinet.data.ImportedTheme
 import dev.spinet.data.NetworkRepository
 import dev.spinet.data.ExplorePage
 import dev.spinet.data.ExploreShelf
+import dev.spinet.data.PlaylistHit
 import dev.spinet.data.ExploreSource
 import dev.spinet.data.nowEpochMillis
 import dev.spinet.data.PlaylistImportResult
@@ -113,6 +114,7 @@ data class ServerEntry(
 data class AppUiState(
     val searchQuery: String = "",
     val searchResults: List<Track> = emptyList(),
+    val searchPlaylists: List<PlaylistHit> = emptyList(),
     val isSearching: Boolean = false,
     val searchError: String? = null,
 
@@ -304,6 +306,8 @@ class MainViewModel(
         const val KEEP_PLAYING_RECENT = 30
         const val FOR_YOU_COUNT = 24
         const val FOR_YOU_SEEDS = 4
+        const val PLAYLIST_UPDATE_DELAY_MS = 15_000L
+        const val PLAYLIST_UPDATE_EVERY_MS = 24L * 60 * 60 * 1000
 
         const val SERVER_RECHECK_MS = 30_000L
 
@@ -531,6 +535,7 @@ class MainViewModel(
     private var identifyJob: Job? = null
 
     init {
+        updateSavedPlaylistsInBackground()
         publishMostPlayed()
         _uiState.value = _uiState.value.copy(
             identifySources = runCatching { audioCapture?.sources() }.getOrNull().orEmpty()
@@ -1011,11 +1016,20 @@ class MainViewModel(
                     )
                     return@launch
                 }
+                _uiState.value = _uiState.value.copy(searchPlaylists = emptyList())
                 val results = repository.search(query)
                 _uiState.value = _uiState.value.copy(
                     searchResults = results.distinctById(),
                     isSearching = false
                 )
+                val playlists = try {
+                    repository.searchPlaylists(query)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                _uiState.value = _uiState.value.copy(searchPlaylists = playlists)
             } catch (e: SearchUnavailableException) {
                 _uiState.value = _uiState.value.copy(
                     isSearching = false,
@@ -2755,6 +2769,49 @@ class MainViewModel(
         refreshLibrary()
     }
 
+    fun onUpdatePlaylistFromSource(id: String) {
+        viewModelScope.launch {
+            beginTransfer("Updating playlist…")
+            val status = updatePlaylistFromSource(id)
+            finishTransfer(status)
+        }
+    }
+
+    fun onToggleKeepRemovedSongs(id: String) {
+        val playlist = libraryRepository.playlists().firstOrNull { it.id == id } ?: return
+        libraryRepository.setKeepRemovedSongs(id, !playlist.keepRemovedSongs)
+        refreshLibrary()
+    }
+
+    private suspend fun updatePlaylistFromSource(id: String): String {
+        val playlist = libraryRepository.playlists().firstOrNull { it.id == id }
+            ?: return "✗ That playlist is gone."
+        if (playlist.originPluginId.isBlank()) return "✗ This playlist wasn't saved from Explore."
+        val fresh = try {
+            repository.explore(playlist.originPluginId, playlist.originFolderId).tracks
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return "✗ Couldn't update \"${playlist.name}\": ${failureReason(e)}"
+        }
+        if (fresh.isEmpty()) return "✗ Couldn't update \"${playlist.name}\": its source is off or empty."
+        val (added, removed) = libraryRepository.updateFromOrigin(id, fresh, nowEpochMillis())
+            ?: return "✗ That playlist is gone."
+        refreshLibrary()
+        return "Updated \"${playlist.name}\": $added new" + if (removed > 0) ", $removed removed." else "."
+    }
+
+    private fun updateSavedPlaylistsInBackground() {
+        viewModelScope.launch {
+            delay(PLAYLIST_UPDATE_DELAY_MS)
+            val due = libraryRepository.playlists().filter {
+                it.originPluginId.isNotBlank() &&
+                    nowEpochMillis() - it.originSyncedAt > PLAYLIST_UPDATE_EVERY_MS
+            }
+            for (playlist in due) runCatching { updatePlaylistFromSource(playlist.id) }
+        }
+    }
+
     fun onSetPlaylistImage(id: String, imageUrl: String) {
         libraryRepository.setPlaylistImage(id, imageUrl)
         refreshLibrary()
@@ -3164,7 +3221,13 @@ class MainViewModel(
         )
     }
 
-    fun onSavePlaylistToLibrary(name: String, tracks: List<Track>, imageUrl: String = "") {
+    fun onSavePlaylistToLibrary(
+        name: String,
+        tracks: List<Track>,
+        imageUrl: String = "",
+        originPluginId: String = "",
+        originFolderId: String = ""
+    ) {
         if (tracks.isEmpty()) return
         val taken = _uiState.value.playlists.map { it.name.lowercase() }.toSet()
         val free = generateSequence(1) { it + 1 }
@@ -3173,6 +3236,11 @@ class MainViewModel(
         val playlist = libraryRepository.createPlaylist(free) ?: return
         libraryRepository.addTracksToPlaylist(playlist.id, tracks)
         if (imageUrl.isNotBlank()) libraryRepository.setPlaylistImage(playlist.id, imageUrl)
+        if (originPluginId.isNotBlank() && originFolderId.isNotBlank()) {
+            libraryRepository.setPlaylistOrigin(
+                playlist.id, originPluginId, originFolderId, tracks.map { it.id }, nowEpochMillis()
+            )
+        }
         refreshLibrary()
         beginTransfer("Saving to your library")
         finishTransfer("Added \"$free\" to your library with ${tracks.size} songs.")

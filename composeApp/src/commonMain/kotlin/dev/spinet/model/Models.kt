@@ -137,7 +137,12 @@ data class Playlist(
     val id: String,
     val name: String,
     val tracks: List<Track> = emptyList(),
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    val originPluginId: String = "",
+    val originFolderId: String = "",
+    val originTrackIds: List<String> = emptyList(),
+    val keepRemovedSongs: Boolean = true,
+    val originSyncedAt: Long = 0
 )
 
 @Serializable

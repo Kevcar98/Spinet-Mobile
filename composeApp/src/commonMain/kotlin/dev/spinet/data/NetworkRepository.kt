@@ -114,6 +114,22 @@ class NetworkRepository(
         sourceId = source.id
     )
 
+    suspend fun searchPlaylists(query: String): List<PlaylistHit> {
+        if (query.isBlank() || isLink(query)) return emptyList()
+        return enabledExtensions().filter { Capability.BROWSE in it.capabilities }.flatMap { ext ->
+            val source = ExploreSource(EXTENSION_PLUGIN_PREFIX + ext.id, ext.name)
+            try {
+                ext.searchPlaylists(query)
+                    .filter { it.isContainer }
+                    .map { PlaylistHit(source, ExploreFolder(it.id, it.name, it.artworkUrl)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
     fun exploreSources(): List<ExploreSource> =
         enabledExtensions()
             .filter { Capability.BROWSE in it.capabilities }
@@ -992,6 +1008,7 @@ private class GuardedSource(private val inner: MusicSource) : MusicSource {
     override suspend fun resolve(trackId: String) = guard { inner.resolve(trackId) }
     override suspend fun browse(parentId: String?) = guard { inner.browse(parentId) }
     override suspend fun browseTracks(parentId: String) = guard { inner.browseTracks(parentId) }
+    override suspend fun searchPlaylists(query: String) = guard { inner.searchPlaylists(query) }
     override suspend fun related(trackId: String) = guard { inner.related(trackId) }
     override suspend fun track(trackId: String) = guard { inner.track(trackId) }
     override suspend fun open(url: String) = guard { inner.open(url) }

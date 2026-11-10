@@ -76,6 +76,42 @@ class LibraryRepository(
         persistPlaylists()
     }
 
+    fun setPlaylistOrigin(id: String, pluginId: String, folderId: String, trackIds: List<String>, syncedAt: Long) {
+        playlists = playlists.map {
+            if (it.id == id) it.copy(
+                originPluginId = pluginId,
+                originFolderId = folderId,
+                originTrackIds = trackIds,
+                originSyncedAt = syncedAt
+            ) else it
+        }.toMutableList()
+        persistPlaylists()
+    }
+
+    fun setKeepRemovedSongs(id: String, keep: Boolean) {
+        playlists = playlists.map { if (it.id == id) it.copy(keepRemovedSongs = keep) else it }.toMutableList()
+        persistPlaylists()
+    }
+
+    fun updateFromOrigin(id: String, fresh: List<Track>, syncedAt: Long): Pair<Int, Int>? {
+        val playlist = playlists.firstOrNull { it.id == id } ?: return null
+        val freshIds = fresh.map { it.id }.toSet()
+        val previous = playlist.originTrackIds.toSet()
+        val kept = if (playlist.keepRemovedSongs) playlist.tracks
+            else playlist.tracks.filter { it.id !in previous || it.id in freshIds }
+        val have = kept.map { it.id }.toSet()
+        val added = fresh.filter { it.id !in have }
+        playlists = playlists.map {
+            if (it.id == id) it.copy(
+                tracks = kept + added,
+                originTrackIds = fresh.map { t -> t.id },
+                originSyncedAt = syncedAt
+            ) else it
+        }.toMutableList()
+        persistPlaylists()
+        return added.size to (playlist.tracks.size - kept.size)
+    }
+
     fun setPlaylistImage(id: String, imageUrl: String) {
         playlists = playlists.map { if (it.id == id) it.copy(imageUrl = imageUrl.trim()) else it }.toMutableList()
         persistPlaylists()

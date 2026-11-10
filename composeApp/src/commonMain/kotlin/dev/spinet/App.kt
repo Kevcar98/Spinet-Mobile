@@ -130,6 +130,7 @@ fun App(
     }
 
     val state by viewModel.uiState.collectAsState()
+    var artistRequest by remember { mutableStateOf<String?>(null) }
     val canFindVersions = state.sources.any { source ->
         source.enabled && when (source.kind) {
             SourceKind.SERVER -> true
@@ -156,7 +157,11 @@ fun App(
         ?: lightColorScheme()
 
     MaterialTheme(colorScheme = colorScheme) {
-      CompositionLocalProvider(LocalHighQualityArt provides state.highQualityArt) {
+      CompositionLocalProvider(
+        LocalHighQualityArt provides state.highQualityArt,
+        dev.spinet.ui.screens.LocalShowArtist provides { artist -> artistRequest = artist },
+        dev.spinet.ui.screens.LocalShowRowArrows provides false
+      ) {
         var current by remember { mutableStateOf(Destination.Library) }
 
         var libraryDetail by remember { mutableStateOf<String?>(null) }
@@ -166,6 +171,15 @@ fun App(
 
         var localFolder by remember { mutableStateOf<String?>(null) }
         var showNowPlaying by remember { mutableStateOf(false) }
+        val exploreNav = dev.spinet.ui.screens.rememberExploreNav()
+        LaunchedEffect(artistRequest) {
+            val artist = artistRequest ?: return@LaunchedEffect
+            artistRequest = null
+            showNowPlaying = false
+            current = Destination.Search
+            viewModel.onSearchQueryChange(artist)
+            viewModel.onSearchCommitted(artist)
+        }
 
         LaunchedEffect(Unit) { viewModel.onCheckForUpdates() }
 
@@ -338,6 +352,7 @@ fun App(
             (browseFolderTitle != null || browseSource != null || libraryDetail != null)
         PlatformBackHandler(enabled = current != Destination.Library || libraryCanPop) {
             when {
+                current == Destination.Explore && exploreNav.canPop -> exploreNav.pop()
                 current != Destination.Library -> current = Destination.Library
                 browseFolderTitle != null -> browseFolderTitle = null
                 browseSource != null -> browseSource = null
@@ -484,6 +499,12 @@ fun App(
                 Destination.Search -> SearchScreen(
                     query = state.searchQuery,
                     results = state.searchResults,
+                    header = {
+                        dev.spinet.ui.screens.PlaylistResultsRow(state.searchPlaylists) { hit ->
+                            exploreNav.openFolder(hit.source, hit.folder)
+                            current = Destination.Explore
+                        }
+                    },
                     isSearching = state.isSearching,
                     error = state.searchError,
                     downloadStatus = state.downloadStatus,
@@ -524,6 +545,7 @@ fun App(
                 )
 
                 Destination.Explore -> ExploreScreen(
+                    nav = exploreNav,
                     sources = remember(state.sources) { viewModel.exploreSources() },
                     loadForYou = viewModel::forYouShelves,
                     loadPage = viewModel::explore,
@@ -534,7 +556,9 @@ fun App(
                     folderSettingsFor = viewModel::folderSettings,
                     onSaveFolderSettings = viewModel::onSaveFolderSettings,
                     serverTargets = browsableSources,
-                    onSaveToLibrary = { name, tracks, image -> viewModel.onSavePlaylistToLibrary(name, tracks, image) },
+                    onSaveToLibrary = { name, tracks, image, pluginId, folderId ->
+                        viewModel.onSavePlaylistToLibrary(name, tracks, image, pluginId, folderId)
+                    },
                     onDownloadAll = { name, tracks -> viewModel.onDownloadPlaylistToDevice(tracks, name) },
                     onUploadAll = { name, tracks, baseUrl -> viewModel.onUploadPlaylistToServer(tracks, baseUrl, name) },
                     favoriteTrackIds = state.favoriteTrackIds,
@@ -634,6 +658,8 @@ fun App(
                             onImportPlaylist = viewModel::onImportPlaylist,
                             onRenamePlaylist = viewModel::onRenamePlaylist,
                             onSetPlaylistImage = viewModel::onSetPlaylistImage,
+                            onUpdateFromSource = viewModel::onUpdatePlaylistFromSource,
+                            onToggleKeepRemoved = viewModel::onToggleKeepRemovedSongs,
                             onDeletePlaylist = viewModel::onDeletePlaylist,
                             onMovePlaylist = viewModel::onMovePlaylist,
                             onDownloadPlaylist = { pl ->

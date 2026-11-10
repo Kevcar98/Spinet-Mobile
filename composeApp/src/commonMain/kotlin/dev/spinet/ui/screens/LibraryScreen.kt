@@ -20,6 +20,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDownload
@@ -83,6 +86,8 @@ fun LibraryScreen(
     onImportPlaylist: (String) -> Unit,
     onRenamePlaylist: (String, String) -> Unit = { _, _ -> },
     onSetPlaylistImage: (String, String) -> Unit = { _, _ -> },
+    onUpdateFromSource: ((String) -> Unit)? = null,
+    onToggleKeepRemoved: ((String) -> Unit)? = null,
     onDeletePlaylist: (String) -> Unit = {},
     onMovePlaylist: (Int, Int) -> Unit = { _, _ -> },
 
@@ -345,6 +350,26 @@ fun LibraryScreen(
                                         leadingIcon = { Icon(Icons.Filled.HideImage, null) },
                                         text = { Text("Remove picture") },
                                         onClick = { menuOpen = false; onSetPlaylistImage(playlist.id, "") }
+                                    )
+                                }
+                                if (playlist.originPluginId.isNotBlank() && onUpdateFromSource != null) {
+                                    DropdownMenuItem(
+                                        leadingIcon = { Icon(Icons.Filled.Sync, null) },
+                                        text = { Text("Update from source") },
+                                        onClick = { menuOpen = false; onUpdateFromSource(playlist.id) }
+                                    )
+                                }
+                                if (playlist.originPluginId.isNotBlank() && onToggleKeepRemoved != null) {
+                                    DropdownMenuItem(
+                                        leadingIcon = {
+                                            Icon(
+                                                if (playlist.keepRemovedSongs) Icons.Filled.CheckBox
+                                                else Icons.Filled.CheckBoxOutlineBlank,
+                                                null
+                                            )
+                                        },
+                                        text = { Text("Keep songs the source removes") },
+                                        onClick = { onToggleKeepRemoved(playlist.id) }
                                     )
                                 }
                                 DropdownMenuItem(

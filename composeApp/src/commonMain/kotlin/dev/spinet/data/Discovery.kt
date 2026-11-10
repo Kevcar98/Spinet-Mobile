@@ -12,3 +12,5 @@ data class ExplorePage(
 )
 
 data class ExploreShelf(val title: String, val tracks: List<Track>)
+
+data class PlaylistHit(val source: ExploreSource, val folder: ExploreFolder)

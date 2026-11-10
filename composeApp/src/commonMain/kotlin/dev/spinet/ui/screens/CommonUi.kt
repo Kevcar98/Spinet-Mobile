@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
@@ -272,6 +273,14 @@ internal fun TrackRow(
                             onClick = { menuOpen = false; onPickVersion() }
                         )
                     }
+                    val showArtist = LocalShowArtist.current
+                    if (showArtist != null && track.artist.isNotBlank() && track.artist != "Unknown artist") {
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(Icons.Filled.Person, null) },
+                            text = { Text("More from ${track.artist}") },
+                            onClick = { menuOpen = false; showArtist(track.artist) }
+                        )
+                    }
 
                     if (!isLocal && onSaveToDevice != null && track.downloadable) {
                         DropdownMenuItem(
@@ -493,3 +502,5 @@ internal fun FastScrollbar(
         )
     }
 }
+
+internal val LocalShowArtist = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
