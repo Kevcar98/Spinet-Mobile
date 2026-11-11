@@ -50,6 +50,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import dev.spinet.model.matchKey
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -122,10 +126,13 @@ internal fun ExploreScreen(
     onToggleFavorite: (Track) -> Unit,
     onAddToPlaylist: (Track) -> Unit,
     onPickVersion: ((Track) -> Unit)?,
+    currentTrackKey: String? = null,
+    playingProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     val crumb = nav.stack.lastOrNull()
 
+    CompositionLocalProvider(LocalExploreNow provides ExploreNow(currentTrackKey, playingProgress)) {
     if (crumb == null) {
         ExploreHome(
             sources = sources,
@@ -161,7 +168,12 @@ internal fun ExploreScreen(
             modifier = modifier
         )
     }
+    }
 }
+
+private data class ExploreNow(val key: String?, val progress: Float)
+
+private val LocalExploreNow = compositionLocalOf { ExploreNow(null, 0f) }
 
 @Composable
 private fun ExploreHome(
@@ -358,6 +370,8 @@ private fun ShelfRow(shelf: ExploreShelf, onPlay: (Track, List<Track>) -> Unit) 
         }
         ArrowRow(contentPadding = PaddingValues(horizontal = 16.dp)) {
             items(shelf.tracks, key = { "${shelf.title}_${it.id}" }) { track ->
+                val nowKey = LocalExploreNow.current.key
+                val isCurrent = nowKey != null && track.matchKey() == nowKey
                 Column(
                     modifier = Modifier
                         .width(SHELF_CARD)
@@ -368,6 +382,8 @@ private fun ShelfRow(shelf: ExploreShelf, onPlay: (Track, List<Track>) -> Unit) 
                     Text(
                         track.title,
                         style = MaterialTheme.typography.bodyMedium,
+                        color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                        fontWeight = if (isCurrent) FontWeight.SemiBold else null,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -635,9 +651,13 @@ private fun ExploreTrackRow(
     onAddToPlaylist: (Track) -> Unit,
     onPickVersion: ((Track) -> Unit)?
 ) {
+    val now = LocalExploreNow.current
+    val isCurrent = now.key != null && track.matchKey() == now.key
     TrackRow(
         track = track,
         onClick = { onPlay(track, list) },
+        isCurrent = isCurrent,
+        progress = if (isCurrent) now.progress else 0f,
         isFavorite = track.id in favoriteTrackIds,
         onToggleFavorite = { onToggleFavorite(track) },
         onAddToPlaylist = { onAddToPlaylist(track) },

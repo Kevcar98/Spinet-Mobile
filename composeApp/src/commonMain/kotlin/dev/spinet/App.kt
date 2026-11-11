@@ -546,6 +546,8 @@ fun App(
 
                 Destination.Explore -> ExploreScreen(
                     nav = exploreNav,
+                    currentTrackKey = nowKey,
+                    playingProgress = nowProgress,
                     sources = remember(state.sources) { viewModel.exploreSources() },
                     loadForYou = viewModel::forYouShelves,
                     loadPage = viewModel::explore,
