@@ -1,5 +1,9 @@
 package dev.spinet
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.basicMarquee
 import dev.spinet.data.savedServerSignIns
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
@@ -1046,11 +1050,17 @@ private fun VersionPickerDialog(
         },
         title = { Text("Other versions") },
         text = {
-            Column {
+            val dialogScroll = androidx.compose.foundation.rememberScrollState()
+            Box {
+            Column(
+                Modifier.verticalScroll(dialogScroll).padding(end = 18.dp)
+            ) {
                 Text(
                     "${original.title} - ${original.artist}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee()
                 )
                 Text(
                     "▶ preview · Use = replace this song with that version",
@@ -1086,10 +1096,8 @@ private fun VersionPickerDialog(
                         Text("  Finding versions…")
                     }
                     options.isEmpty() -> Text("Nothing found. Try different words above.")
-                    else -> androidx.compose.foundation.lazy.LazyColumn(
-                        modifier = Modifier.heightIn(max = 360.dp)
-                    ) {
-                        items(options, key = { it.id }) { opt ->
+                    else -> Column {
+                        options.forEach { opt ->
                             val previewing = playingKey != null && opt.matchKey() == playingKey
                             androidx.compose.material3.ListItem(
                                 leadingContent = {
@@ -1110,13 +1118,14 @@ private fun VersionPickerDialog(
                                     }
                                 },
                                 headlineContent = {
-                                    Text(opt.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(opt.title, maxLines = 1, modifier = Modifier.basicMarquee())
                                 },
                                 supportingContent = {
                                     Text(
                                         listOf(opt.artist, opt.durationLabel)
                                             .filter { it.isNotBlank() }.joinToString(" · "),
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                        maxLines = 1,
+                                        modifier = Modifier.basicMarquee()
                                     )
                                 },
                                 trailingContent = {
@@ -1156,6 +1165,11 @@ private fun VersionPickerDialog(
                         enabled = linkText.isNotBlank()
                     ) { Text("Use") }
                 }
+            }
+            dev.spinet.ui.screens.ScrollIndicator(
+                dialogScroll,
+                Modifier.matchParentSize().wrapContentWidth(Alignment.End)
+            )
             }
         }
     )

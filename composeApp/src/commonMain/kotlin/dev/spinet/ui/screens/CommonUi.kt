@@ -504,3 +504,49 @@ internal fun FastScrollbar(
 }
 
 internal val LocalShowArtist = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+@Composable
+internal fun ScrollIndicator(
+    state: androidx.compose.foundation.ScrollState,
+    modifier: Modifier = Modifier
+) {
+    if (state.maxValue <= 0 || state.maxValue == Int.MAX_VALUE) return
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var trackHeight by remember { mutableStateOf(0) }
+    val minThumb = with(androidx.compose.ui.platform.LocalDensity.current) { 32.dp.toPx() }
+    val thumbPx = if (trackHeight <= 0) minThumb
+        else (trackHeight.toFloat() * trackHeight / (trackHeight + state.maxValue)).coerceAtLeast(minThumb)
+    val room = (trackHeight - thumbPx).coerceAtLeast(0f)
+
+    fun jumpTo(y: Float) {
+        if (room <= 0f) return
+        val f = ((y - thumbPx / 2) / room).coerceIn(0f, 1f)
+        scope.launch { state.scrollTo((f * state.maxValue).toInt()) }
+    }
+
+    Box(
+        modifier = modifier
+            .width(16.dp)
+            .onSizeChanged { trackHeight = it.height }
+            .pointerInput(Unit) {
+                detectTapGestures { offset -> jumpTo(offset.y) }
+            }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { change, _ ->
+                    change.consume()
+                    jumpTo(change.position.y)
+                }
+            }
+    ) {
+        val offsetY = room * state.value / state.maxValue
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.toInt()) }
+                .width(5.dp)
+                .height(with(androidx.compose.ui.platform.LocalDensity.current) { thumbPx.toDp() })
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+        )
+    }
+}
